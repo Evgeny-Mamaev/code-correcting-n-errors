@@ -1,19 +1,22 @@
 import unittest
 
 from linearcode import LinearCode
+from linearcode import add_matrix_in_front
 from linearcode import allocate_bits_in_column
-from linearcode import append_matrix_to_front
 from linearcode import compute_parity
-from linearcode import fill_generator_matrix
+from linearcode import fill_generator_matrix_from_a_matrix_transposed
 from linearcode import fill_i_matrix
 from linearcode import fill_parity_check_matrix_and_a_matrix_transposed
-from linearcode import generator_matrix_from_a_matrix_transposed
+from linearcode import generate_syndrome_decoding_table
+from linearcode import partition_binary_numbers_by_weight
+from linearcode import get_hamming_weight
 from linearcode import is_gilbert_varshamov_bound
 from linearcode import is_power_of_two
 from linearcode import multiply_matrices
 from linearcode import negate_matrix
 from linearcode import partition_by_is_power_of_two
 from linearcode import transpose_matrix
+
 
 # TODO test exceptions
 class LinearCodeTest(unittest.TestCase):
@@ -76,19 +79,10 @@ class LinearCodeTest(unittest.TestCase):
             matrix1.append(i + 1)
         matrix2 = fill_i_matrix(k)
         i = 0
-        for num in append_matrix_to_front(matrix1, matrix2, r):
+        for num in add_matrix_in_front(matrix1, matrix2, r):
             # each number consists of the power of two and an element of an I-matrix
             assert num == 2 ** (n - 1 - i) + (i + 1)
             i += 1
-        pass
-
-    def test_fill_generator_matrix(self):
-        n = 10
-        k = 7
-        r = n - k
-        print()
-        for i in fill_generator_matrix(n, k, r):
-            print(format(i, '#0{0}b'.format(n + 2)))
         pass
 
     def test_negate_matrix(self):
@@ -107,7 +101,7 @@ class LinearCodeTest(unittest.TestCase):
         for i in parity_check_matrix:
             print(format(i, '#0{0}b'.format(n + 2)))
         print()
-        for i in generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r):
+        for i in fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r):
             print(format(i, '#0{0}b'.format(n + 2)))
 
     def test_transpose_matrix(self):
@@ -144,7 +138,7 @@ class LinearCodeTest(unittest.TestCase):
         k = 3
         r = n - k
         parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n, r)
-        generator_matrix = generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r)
+        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r)
         multiplied_matrix = multiply_matrices(parity_check_matrix, n, transpose_matrix(generator_matrix, n), k)
         print()
         for i in multiplied_matrix:
@@ -169,6 +163,60 @@ class LinearCodeTest(unittest.TestCase):
         assert len(not_powers_of_two) == n - counter
         assert sum(powers_of_two) + sum(not_powers_of_two) == max_value
         pass
+
+    def test_get_hamming_weight(self):
+        assert get_hamming_weight(7) == 3
+        assert get_hamming_weight(8) == 1
+        assert get_hamming_weight(1) == 1
+        pass
+
+    def test_get_binary_numbers_partitioned_by_weight(self):
+        n = 127
+        length = len(bin(n)) - 2
+        binary_numbers_partitioned_by_weight = partition_binary_numbers_by_weight(n)
+        weight = 0
+        for i in binary_numbers_partitioned_by_weight:
+            if weight != get_hamming_weight(i):
+                weight += 1
+        assert weight <= length
+        sorted_list_of_numbers = sorted(binary_numbers_partitioned_by_weight)
+        for i in range(n):
+            assert sorted_list_of_numbers[i] == i
+
+    def test_generate_syndrome_decoding_table(self):
+        n = 6
+        r = 3
+        k = n - r
+        parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n, r)
+        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r)
+        print()
+        print('A parity check matrix:')
+        print()
+        for num in parity_check_matrix:
+            print(format(num, '#0{0}b'.format(n + 2)))
+        print()
+        print('A generator matrix:')
+        print()
+        for num in generator_matrix:
+            print(format(num, '#0{0}b'.format(n + 2)))
+        syndrome_decoding_table = generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k)
+        for key in syndrome_decoding_table.keys():
+            print()
+            print(format(key, '#0{0}b'.format(k + 2)))
+            print('---------')
+            for word in syndrome_decoding_table[key]:
+                print(format(word, '#0{0}b'.format(n + 2)))
+        check_list = []
+        number_of_words = 2 ** n
+        for i in range(number_of_words):
+            check_list.append(i)
+        number_of_words_in_table = 0
+        for key in syndrome_decoding_table.keys():
+            for word in syndrome_decoding_table[key]:
+                check_list.remove(word)
+                number_of_words_in_table += 1
+        assert len(check_list) == 0
+        assert number_of_words_in_table == number_of_words
 
 
 if __name__ == '__main__':

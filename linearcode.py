@@ -1,7 +1,11 @@
-import deprecation
+import random
+
 import math
+import yaml
+from itertools import combinations
 
 
+# TODO a time threshold for long operations
 class LinearCode(object):
     """
     Attributes:
@@ -10,30 +14,55 @@ class LinearCode(object):
             [ 0 1 ...]
             [ 0 0 1  ]
             [ 0 ... 1].
-        a_matrix:    d.
     """
 
-    def __init__(self, n, k, d):
+    def __init__(self, n, k, d, channel_error_probability=0.01):
         """
 
-        :param n: codeword length.
-        :param k: number of significant bits.
-        :param d: minimum code distance.
+        :param n: a codeword length.
+        :param k: a number of significant bits.
+        :param d: a minimum code distance.
+        :param channel_error_probability: a
+        channel error probability.
+        :raises ValueError if the specified
+        parameters aren't complaint with the
+        Gilbert-Varshamov bound.
         """
         if not is_gilbert_varshamov_bound(n=n, k=k, d=d):
             raise ValueError('The given n == {0}, k == {1} and d == {2} aren\'t compliant'
                              ' with the Gilbert-Varshamov bound.'.format(n, k, d))
+        self.channel_error_probability = channel_error_probability
         self.n = n
         self.k = k
         self.d = d
         self.r = n - k
-        self.parity_check_matrix, self.a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n=self.n,
-                                                                                                              r=self.r)
-        self.generator_matrix = fill_generator_matrix_from_a_matrix_transposed(self.a_matrix_transposed, self.k, self.r)
+        self.parity_check_matrix, self.a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(
+            n=self.n,
+            r=self.r,
+            d=self.d)
+        self.generator_matrix = fill_generator_matrix_from_a_matrix_transposed(
+            a_matrix_transposed=self.a_matrix_transposed,
+            k=self.k,
+            r=self.r)
+        self.syndrome_decoding_table = generate_syndrome_decoding_table(
+            generator_matrix=self.generator_matrix,
+            parity_check_matrix=self.parity_check_matrix,
+            n=n,
+            k=k)
         self.i_matrix = fill_i_matrix(size=self.r)
+        print_files(
+            generator_matrix=self.generator_matrix,
+            parity_check_matrix=self.parity_check_matrix,
+            syndrome_decoding_table=self.syndrome_decoding_table,
+            n=n,
+            k=k)
+        print_code_error_probability(
+            n=n,
+            t=((d - 1) / 2).as_integer_ratio()[0],
+            p=channel_error_probability)
 
 
-def fill_parity_check_matrix_and_a_matrix_transposed(n, r):
+def fill_parity_check_matrix_and_a_matrix_transposed(n, r, d):
     """
     Produces an H-matrix in standard form
     and a transposed A-matrix, corresponding
@@ -63,19 +92,125 @@ def fill_parity_check_matrix_and_a_matrix_transposed(n, r):
     """
     k = n - r
     a_matrix = [0] * r
-    powers_of_two, not_powers_of_two = partition_by_is_power_of_two(num=n)
-    powers_of_two.reverse()
-    not_powers_and_powers_of_two = not_powers_of_two + powers_of_two
+    vector_pool = fill_i_matrix(r)
     a_matrix_transposed = []
     for i in range(k):
-        num = not_powers_and_powers_of_two[i]
+        num = find_linearly_independent_vector(
+            vector_pool=vector_pool,
+            number_of_columns_v_p=r,
+            linear_combination_size=d - 2)
         allocate_bits_in_column(
             matrix=a_matrix,
             position=i,
             number=num,
             n=n)
+        vector_pool.insert(i, num)
         a_matrix_transposed.append(num)
     return add_matrix_in_front(where=fill_i_matrix(r), what=a_matrix, lshift=0), a_matrix_transposed
+
+
+def find_linearly_independent_vector(vector_pool, number_of_columns_v_p, linear_combination_size):
+    """
+    Finds a random number which meets the criteria
+    of linear independence in terms of the binary
+    representation from all the possible linear 
+    combinations of size less then or equal to the 
+    specified size of the specified pool of numbers.
+
+    How the algorithms works:
+    It is a stochastic process of finding a linearly
+    independent vector. The algorithm iterates through
+         / i \    / i \      / i \
+    all |    | , |    | ... |    | linear combinations
+        \ 1 /    \ 2 /      \ n /
+    of vectors from
+    :param vector_pool, where i stands for the number
+    of vectors in the pool and n stands for
+    :param linear_combination_size to check whether
+    the randomly picked vector is linearly independent
+    from the combinations. For further information refer
+    to the Gilbert-Varshamov bound theorem proof.
+    :param vector_pool: a list of numbers which
+    the function finds a linearly independent number
+    from in terms of its binary representation.
+    :param number_of_columns_v_p: a length of
+    numbers in the pool.
+    :param linear_combination_size: a size of
+    the set which forms a liner combination.
+    :return: a linearly independent binary vector
+    in form of int.
+    """
+    combinations_v_p = []
+    for i in range(linear_combination_size):
+        combinations_v_p.append(list(combinations(vector_pool, i + 1)))
+    while True:
+        probe = random.randrange(2 ** number_of_columns_v_p)
+        result = f_l_i_v_inner_loop(probe=probe, combinations_v_p=combinations_v_p)
+        if result != 0:
+            return probe
+
+
+def f_l_i_v_inner_loop(probe, combinations_v_p):
+    """
+    Participates in the search of the linearly
+    independent vector as an inner loop.
+    :param probe: a random vector to determine
+    its linear independence.
+    :param combinations_v_p: combinations
+    of vectors, which form linear combinations.
+    The sum modulo 2 of each of these
+    combinations is examined to determine the
+    linear dependence of the probe. If none of
+    them match the probe, it's linearly
+    independent.
+    :return: 0 if the probe is equal to any of
+    the sum, the probe itself otherwise.
+    """
+    for particular_combinations in combinations_v_p:
+        for combination in particular_combinations:
+            if probe == sum_modulo_2(iterable=combination):
+                return 0
+    return probe
+
+
+def sum_modulo_2(iterable):
+    """
+    Sums modulo 2 elements of an iterable.
+    :param iterable: an iterable.
+    :return: the sum module 2 of the elements.
+    """
+    result = 0
+    for i in iterable:
+        result = result ^ i
+    return result
+
+
+def get_random_number_of_hamming_weight(length, weight):
+    """
+    Returns a random number of a particular Hamming
+    weight.
+    :param length: a length of a number.
+    :param weight: a weight of a number.
+    :return: the number meets the requirements of
+    length and Hamming weight.
+    :raises: ValueError if the weight is greater
+    than the length.
+    """
+    if weight > length:
+        raise ValueError('The weight shouldn\'t be greater'
+                         ' than the length: {0} > {1}'
+                         .format(weight, length))
+    i = 0
+    result = 0
+    while True:
+        if i == weight:
+            return result
+        shift = random.randrange(length)
+        power_of_two = 1 << shift
+        if power_of_two & result == power_of_two:
+            continue
+        result |= power_of_two
+        i += 1
 
 
 def fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r):
@@ -86,9 +221,9 @@ def fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r):
         [  k |    ]
                                     tr
     :param a_matrix_transposed: an A  -matrix.
-    :param k: the number of significant bits.
-    :param r: the number of check bits.
-    :return: the G-matrix.
+    :param k: a number of significant bits.
+    :param r: a number of check bits.
+    :return: a G-matrix.
     """
     return add_matrix_in_front(
         where=a_matrix_transposed,
@@ -126,10 +261,10 @@ def multiply_matrices(matrix1, num_col_m1, matrix2, num_col_m2):
     :param matrix2: the second matrix to multiply.
     :param num_col_m2: the number of columns in
     the second matrix.
+    :return: the product of two matrices.
     :raises: ValueError in case if the number of
     columns of the first matrix doesn't equal to
     the number of lines of the second matrix.
-    :return: the product of two matrices.
     """
     m1_length = len(matrix1)
     m2_length = len(matrix2)
@@ -138,12 +273,13 @@ def multiply_matrices(matrix1, num_col_m1, matrix2, num_col_m2):
                          'matrix1 size is nxm = {0}x{1}, '
                          'matrix2 size is mxp = {2}x{3}. '
                          '{1} != {2} '.format(m1_length, num_col_m1, m2_length, num_col_m2))
-    transposed_matrix2 = transpose_matrix(matrix2, num_col_m2)
+    transposed_matrix2 = transpose_matrix(matrix=matrix2, number_of_columns=num_col_m2)
     result = [0] * m1_length
     for i in range(m1_length):
         for j in range(num_col_m2):
-            result[i] = result[i] | compute_parity(matrix1[i] & transposed_matrix2[j], m2_length) << (
-                    num_col_m2 - j - 1)
+            result[i] = result[i] | compute_parity(
+                number=matrix1[i] & transposed_matrix2[j],
+                length=m2_length) << (num_col_m2 - j - 1)
     return result
 
 
@@ -164,17 +300,6 @@ def compute_parity(number, length):
         number = number ^ (number >> i)
         i *= 2
     return number & 1
-
-
-@deprecation.deprecated(deprecated_in="1.0", removed_in="2.0",
-                        current_version="1.0",
-                        details="An unused function")
-def negate_matrix(matrix, r):
-    k = len(matrix)
-    negated_matrix = [0] * k
-    for i in range(k):
-        negated_matrix[i] = matrix[i] ^ (2 ** r - 1)
-    return negated_matrix
 
 
 def fill_i_matrix(size):
@@ -208,7 +333,7 @@ def add_matrix_in_front(where, what, lshift):
 
     :param where: the matrix where to add another one.
     :param what: the matrix which to add.
-    :param lshift: the number of columns to shift,
+    :param lshift: a number of columns to shift,
     normally it's the width of the where matrix.
     :raises: ValueError if the numbers of lines
     of the matrices are different.
@@ -250,12 +375,12 @@ def partition_by_is_power_of_two(num):
 def allocate_bits_in_column(matrix, position, number, n):
     """
     Not a pure function, which modifies the passed 2-d array by filling
-    any given row with the binary representation of the given number
-    :param matrix: the matrix is to be filled
-    :param position: position of a bit in a binary row, from left to right
+    any given row with the binary representation of the given number.
+    :param matrix: the matrix is to be filled.
+    :param position: a position of a bit in a binary row, from left to right.
     :param number: a number is to be split and allocated in a column
-           with the aforementioned position
-    :param n: number of columns
+    with the aforementioned position.
+    :param n: number of columns.
     """
     r = len(matrix)
     for j in range(r):
@@ -269,8 +394,7 @@ def is_power_of_two(num):
     checks whether it has only one 1 => the power of 2.
     :param num: a number to check.
     :return: true if the number has only one 1
-             and all the remaining 0,
-             false otherwise.
+    and all the remaining 0, false otherwise.
     """
     counter = 0
     for i in (range(len(bin(num)) - 2)):
@@ -286,12 +410,12 @@ def is_gilbert_varshamov_bound(n, k, d):
     Computes the Gilbert-Varshamov bound and
     determines whether the specified combination
     of parameters complies with the bound.
-    :param n: codeword length
-    :param k: number of significant bits
-    :param d: minimum code distance
+    :param n: a codeword length
+    :param k: a number of significant bits
+    :param d: a minimum code distance
     :return: the result of the Gilbert-Varshamov bound,
-             true if the tuple (n, k, d) satisfies the bound,
-             false if not.
+    true if the tuple (n, k, d) satisfies the bound,
+    false if not.
 
                 /n - 1\              /n - 1\      r
          1  +  |      |  +  ...  +  |      |  <  2 , r = n - k
@@ -321,13 +445,13 @@ def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k
     [0]  ->  code:  0000  1011  0101  1110
 
     [1]
-    [1]  -> coset:  1000  0011  1101  0110
+    [1]  -> coset:  1000
 
     [0]
-    [1]  -> coset:  0100  1111  0001  1010
+    [1]  -> coset:  0100
 
     [1]
-    [0]  -> coset:  0010  1001  0111  1100
+    [0]  -> coset:  0010
                    coset
                   leaders
     :param generator_matrix: a generator matrix
@@ -336,8 +460,7 @@ def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k
     :param n: the length of the code word
     :param k: the number of significant bits
     :return: a table, which maps lists of error
-    vectors belong to the same coset to the
-    coset syndrome.
+    vectors have the same syndrome to the syndrome.
     """
     messages = 2 ** k
     r = n - k
@@ -346,27 +469,31 @@ def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k
     syndrome_decoding_table = {}
     for i in range(2 ** r):
         syndrome_decoding_table[i] = []
-    binary_numbers_partitioned_by_weight = partition_binary_numbers_by_weight(coset_shifts)
-    counter = 0
-    for j in range(coset_shifts):
-        if counter == cosets:
-            break
-        coset_shift = binary_numbers_partitioned_by_weight[j]
-        coset_list = []
-        for i in range(messages):
-            code = multiply_matrices([i], k, generator_matrix, n)[0]
-            coset_vector = code ^ coset_shift
-            if get_hamming_weight(coset_vector) < get_hamming_weight(coset_shift):
-                coset_list = []
-                break
-            coset_list.append(coset_vector)
-        if len(coset_list) == 0:
+    for i in range(messages):
+        syndrome_decoding_table[0].insert(i, multiply_matrices(
+            matrix1=[i],
+            num_col_m1=k,
+            matrix2=generator_matrix,
+            num_col_m2=n)[0])
+    binary_numbers_partitioned_by_weight = partition_binary_numbers_by_weight(num=coset_shifts)
+    j = 0
+    for i in binary_numbers_partitioned_by_weight:
+        syndrome_transposed = multiply_matrices(
+            matrix1=parity_check_matrix,
+            num_col_m1=n,
+            matrix2=transpose_matrix(
+                matrix=[i],
+                number_of_columns=n),
+            num_col_m2=1)
+        syndrome = transpose_matrix(
+            matrix=syndrome_transposed,
+            number_of_columns=1)[0]
+        if syndrome == 0:
             continue
-        syndrome_transposed = multiply_matrices(parity_check_matrix, n, transpose_matrix([counter], n), 1)
-        syndrome = transpose_matrix(syndrome_transposed, 1)[0]
-        for i in coset_list:
-            syndrome_decoding_table[syndrome].append(i)
-        counter += 1
+        syndrome_decoding_table[syndrome].append(i)
+        if j >= cosets:
+            break
+        j += 1
     return syndrome_decoding_table
 
 
@@ -387,7 +514,7 @@ def partition_binary_numbers_by_weight(num):
     for i in range(length):
         weight_map[i] = []
     for i in range(num):
-        weight = get_hamming_weight(i)
+        weight = get_hamming_weight(num=i)
         weight_map[weight].append(i)
     result = []
     for list_of_numbers in weight_map.values():
@@ -416,12 +543,224 @@ def get_hamming_weight(num):
     return weight
 
 
+def get_binomial_coefficient(n, k):
+    """
+    Calculates a binomial coefficient
+     / n \
+    |    |
+    \ k /.
+    :param n: a number of elements
+    from which the combinations should
+    be picked.
+    :param k: a number of elements in
+    each combination.
+    :return: a number of combinations.
+    """
+    r = n - k
+    return math.factorial(n) / math.factorial(k) / math.factorial(r)
+
+
+def calculate_p_error(n, t, p):
+    """
+    Calculates the probability of
+    error for the code with the
+    particular parameters.
+    :param n: a codeword length.
+    :param t: a number of correctable
+    errors.
+    :param p: the probability of
+    the channel error.
+    :return: the probability of
+    error for the code correcting
+    the specified number of errors.
+    """
+    sum = 0
+    for i in range(t + 1):
+        sum += get_binomial_coefficient(n=n, k=i) * p ** i * (1 - p) ** (n - i)
+    return 1 - sum
+
+
+def print_files(generator_matrix, parity_check_matrix, syndrome_decoding_table, n, k):
+    """
+    Prints files for the coding-
+    decoding process.
+    :param generator_matrix: a generator
+    matrix used for a coder.
+    :param parity_check_matrix: a parity
+    check matrix used for a decoder.
+    :param syndrome_decoding_table:
+    a syndrome decoding table used for
+    a decoder to match a distorted vector
+    with a coset leader and then find
+    the difference of the distorted vector
+    and the leader among the vectors from
+    the zeroth coset.
+    :param n: a length of a codeword.
+    :param k: a length of a message.
+    """
+    config = yaml.safe_load(open("config.yml"))
+    r = n - k
+    with open(config['coder-generator'], 'a') as file:
+        for i in generator_matrix:
+            file.write('{0:0>{width}b}'.format(i, width=n))
+            file.write('\n')
+    with open(config['decoder-parity-check'], 'a') as file:
+        for i in parity_check_matrix:
+            file.write('{0:0>{width}b}'.format(i, width=n))
+            file.write('\n')
+    with open(config['decoder-syndrome-decoding'], 'a') as file:
+        for key in syndrome_decoding_table.keys():
+            file.write('\n')
+            file.write('S:{0:0>{width}b}'.format(key, width=r))
+            file.write('\n')
+            file.write('---------')
+            file.write('\n')
+            for word in syndrome_decoding_table[key]:
+                file.write('{0:0>{width}b}'.format(word, width=n))
+                file.write('\n')
+
+
+def print_code_error_probability(n, t, p):
+    """
+    Prints the error probability of a code.
+    :param n: a codeword length.
+    :param t: a number of correctable
+    errors.
+    :param p: the probability of
+    the channel error.
+    """
+    print()
+    print('The decoder error probability is {0:.2%}'.format(calculate_p_error(n, t, p)))
+
+
+def read_file_to_list(name):
+    """
+    Reads a file consists of a
+    list of binary vectors.
+    :param name: a name of
+    a file.
+    :return: a list of binary
+    vectors in form of int.
+    """
+    lines = []
+    with open(name) as file:
+        for line in file:
+            line = line.strip()
+            lines.append(int(line, 2))
+    return lines
+
+
+def read_file_to_dict(name):
+    """
+    Reads a file consists of a
+    dictionary in a special form:
+    S:000
+    ___________
+    0000001
+    0000010
+    where S: stands for a syndrome
+    and the vectors below the dash
+    stand for the error vectors,
+    which have the particular
+    syndrome. A syndrome is a key,
+    the vectors are the values of
+    a dictionary.
+    :param name: a name of
+    a file.
+    :return: a dict of binary
+    vectors map to a list of
+    error vectors in form of int.
+    """
+    dictionary = {}
+    with open(name) as file:
+        key = 0
+        for line in file:
+            line = line.rstrip()
+            if line.isdigit():
+                dictionary[key].append(int(line, 2))
+            if line.startswith('S'):
+                key = int(line.partition(':')[2], 2)
+                dictionary[key] = []
+    return dictionary
+
+
+def code(coder_file, message, m_length, error=0):
+    """
+    Codes a message and distorts the code
+    by the specified error vector if any
+    presents or an arbitrary error.
+    :param coder_file: a file where a
+    generator matrix is written.
+    :param message: a message to code.
+    :param m_length: a message length.
+    :param error: an optional error,
+    which distorts an obtained code.
+    :return: a tuple of a code, a
+    distorted code, an error vector.
+    :raises: ValueError if the length
+    of the G-matrix and m_length are
+    incompatible.
+    """
+    generator_matrix = read_file_to_list(name=coder_file)
+    max_line = max(generator_matrix)
+    number_of_columns_g_m = len(bin(max_line)) - 2
+    gen_matrix_length = len(generator_matrix)
+    if gen_matrix_length != m_length:
+        raise ValueError('The given len(generator_matrix) == {0}'
+                         ' and m_length == {1} are incompatible.'
+                         ' {0} != {1}.'.
+                         format(gen_matrix_length, m_length))
+    if error == 0:
+        error = random.randrange(2 ** number_of_columns_g_m)
+    code = multiply_matrices(
+        matrix1=[message],
+        num_col_m1=m_length,
+        matrix2=generator_matrix,
+        num_col_m2=number_of_columns_g_m)[0]
+    return code, code ^ error, error
+
+
+def decode(parity_check_file, n, syndrome_file, distorted_code):
+    """
+    Decodes a distorted message.
+    :param parity_check_file: a file
+    contains a parity check matrix.
+    :param n: a number of columns in
+    the parity check matrix.
+    :param syndrome_file: a file
+    contains a syndrome decoding
+    table.
+    :param distorted_code: a
+    distorted code.
+    :return: a decoded message
+    """
+    parity_check_matrix = read_file_to_list(name=parity_check_file)
+    syndrome_decoding_table = read_file_to_dict(name=syndrome_file)
+    syndrome = transpose_matrix(
+        matrix=multiply_matrices(
+            matrix1=parity_check_matrix,
+            num_col_m1=n,
+            matrix2=transpose_matrix(
+                matrix=[distorted_code],
+                number_of_columns=n),
+            num_col_m2=1),
+        number_of_columns=1)[0]
+    return syndrome_decoding_table[0].index(distorted_code ^ syndrome_decoding_table[syndrome][0])
+
+
 class ErrorCorrectingCode(LinearCode):
-    def __init__(self, r, n, t):
+    def __init__(self, r, n, t, channel_error_probability=0.01):
         """
 
-        :param r: number of check bits
-        :param n: codeword length
-        :param t: number of errors, which the code should correct
+        :param r: a number of check bits.
+        :param n: a codeword length.
+        :param t: a number of errors, which the code should correct.
+        :param channel_error_probability: a
+        channel error probability.
         """
-        LinearCode.__init__(self, n, n - r, 2 * t + 1)
+        LinearCode.__init__(
+            self=self,
+            n=n,
+            k=n - r,
+            d=2 * t + 1,
+            channel_error_probability=channel_error_probability)

@@ -1,0 +1,3 @@
+coder-generator-test: coder-generator-test.txt
+decoder-parity-check-test: decoder-parity-check-test.txt
+decoder-syndrome-decoding-test: decoder-syndrome-decoding-test.txt

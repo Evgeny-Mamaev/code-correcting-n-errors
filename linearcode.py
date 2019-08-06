@@ -4,18 +4,12 @@ import math
 import yaml
 from itertools import combinations
 
+import timeout
 
-# TODO a time threshold for long operations
+
 class LinearCode(object):
-    """
-    Attributes:
-        i_matrix: An (n - k) * (n - k) unit matrix, which looks like
-            [ 1 ... 0]
-            [ 0 1 ...]
-            [ 0 0 1  ]
-            [ 0 ... 1].
-    """
 
+    @timeout.timeout(yaml.safe_load(open("config.yml"))['timeout'])
     def __init__(self, n, k, d, channel_error_probability=0.01):
         """
 
@@ -48,7 +42,8 @@ class LinearCode(object):
             generator_matrix=self.generator_matrix,
             parity_check_matrix=self.parity_check_matrix,
             n=n,
-            k=k)
+            k=k,
+            d=d)
         self.i_matrix = fill_i_matrix(size=self.r)
         print_files(
             generator_matrix=self.generator_matrix,
@@ -85,6 +80,7 @@ def fill_parity_check_matrix_and_a_matrix_transposed(n, r, d):
 
     :param n: a number of columns.
     :param r: a number of rows.
+    :param d: a code distance.
     :return: a tuple of two 2-d arrays
     filled with binary numbers:
     the H-matrix in standard form and
@@ -428,7 +424,7 @@ def is_gilbert_varshamov_bound(n, k, d):
     return is_in_bound
 
 
-def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k):
+def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k, d):
     """
     Generates a syndrome decoding table,
     which maps a coset to its syndrome S.
@@ -454,21 +450,20 @@ def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k
     [0]  -> coset:  0010
                    coset
                   leaders
-    :param generator_matrix: a generator matrix
+    :param generator_matrix: a generator matrix.
     :param parity_check_matrix: a parity check
     matrix.
-    :param n: the length of the code word
-    :param k: the number of significant bits
-    :return: a table, which maps lists of error
+    :param n: the length of the code word.
+    :param k: a number of significant bits.
+    :param d: a code distance.
+    :return: a table, which maps lists of error.
     vectors have the same syndrome to the syndrome.
     """
     messages = 2 ** k
     r = n - k
     cosets = 2 ** r
     coset_shifts = 2 ** n
-    syndrome_decoding_table = {}
-    for i in range(2 ** r):
-        syndrome_decoding_table[i] = []
+    syndrome_decoding_table = {0: []}
     for i in range(messages):
         syndrome_decoding_table[0].insert(i, multiply_matrices(
             matrix1=[i],
@@ -490,7 +485,12 @@ def generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k
             number_of_columns=1)[0]
         if syndrome == 0:
             continue
-        syndrome_decoding_table[syndrome].append(i)
+        if get_hamming_weight(i) <= (d - 1) / 2:
+            if syndrome in syndrome_decoding_table:
+                syndrome_decoding_table[syndrome].append(i)
+            else:
+                syndrome_decoding_table[syndrome] = []
+                syndrome_decoding_table[syndrome].append(i)
         if j >= cosets:
             break
         j += 1
@@ -684,6 +684,7 @@ def read_file_to_dict(name):
     return dictionary
 
 
+@timeout.timeout(yaml.safe_load(open("config.yml"))['timeout'])
 def code(coder_file, message, m_length, error=0):
     """
     Codes a message and distorts the code
@@ -720,6 +721,7 @@ def code(coder_file, message, m_length, error=0):
     return code, code ^ error, error
 
 
+@timeout.timeout(yaml.safe_load(open("config.yml"))['timeout'])
 def decode(parity_check_file, n, syndrome_file, distorted_code):
     """
     Decodes a distorted message.
@@ -749,6 +751,7 @@ def decode(parity_check_file, n, syndrome_file, distorted_code):
 
 
 class ErrorCorrectingCode(LinearCode):
+    @timeout.timeout(yaml.safe_load(open("config.yml"))['timeout'])
     def __init__(self, r, n, t, channel_error_probability=0.01):
         """
 

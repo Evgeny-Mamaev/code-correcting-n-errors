@@ -6,6 +6,7 @@ from itertools import combinations
 
 import linearcode
 from linearcode import LinearCode, \
+    ErrorCorrectingCode, \
     add_matrix_in_front, \
     allocate_bits_in_column, \
     calculate_p_error, \
@@ -23,54 +24,67 @@ from linearcode import LinearCode, \
     multiply_matrices, \
     partition_binary_numbers_by_weight, \
     partition_by_is_power_of_two, \
+    read_file_to_list, \
     read_file_to_dict, \
     sum_modulo_2, \
     transpose_matrix, \
     get_random_number_of_hamming_weight
+from test.testutils import remove_files
 
 
-# TODO test exceptions
-# TODO test files
-# TODO test ErrorCorrectingCode
 class LinearCodeTest(unittest.TestCase):
     n = 21
     k = 6
     r = 15
-    d = 7
+    t = 3
+    d = 2 * t + 1
 
-    def test_init(self):
+    def test_init_l_c(self):
         LinearCode(n=self.n, k=self.k, d=self.d, channel_error_probability=0.01)
-        pass
+
+    def test_init_l_c_exception(self):
+        with self.assertRaises(ValueError):
+            LinearCode(n=3, k=3, d=3, channel_error_probability=0.01)
+
+    def test_init_l_c_timeout(self):
+        with self.assertRaises(TimeoutError):
+            LinearCode(n=30, k=6, d=6, channel_error_probability=0.01)
+
+    def test_init_e_c_c(self):
+        ErrorCorrectingCode(r=self.r, n=self.n, t=self.t, channel_error_probability=0.01)
 
     def test_is_gilbert_varshamov_bound(self):
         #       /10 - 1\     /10 - 1\             5
         # 1  +  |      |  +  |      |  =  46  >  2  =  32  => false
         #       \   1  /     \   2  /
-        assert not is_gilbert_varshamov_bound(10, 5, 4)
+        assert not is_gilbert_varshamov_bound(n=10, k=5, d=4)
         #       /12 - 1\     /12 - 1\             8
         # 1  +  |      |  +  |      |  =  67  <  2  =  256  => true
         #       \   1  /     \   2  /
-        assert is_gilbert_varshamov_bound(12, 4, 4)
-        pass
+        assert is_gilbert_varshamov_bound(n=12, k=4, d=4)
 
     def test_find_linearly_independent_vector(self):
-        assert is_gilbert_varshamov_bound(self.n, self.k, self.d)
-        i_matrix = fill_i_matrix(self.r)
+        assert is_gilbert_varshamov_bound(n=self.n, k=self.k, d=self.d)
+        i_matrix = fill_i_matrix(size=self.r)
         for i in range(1000):
-            result = find_linearly_independent_vector(i_matrix, self.r, self.d - 2)
-            assert get_hamming_weight(result) >= self.d - 1
-        pass
+            result = find_linearly_independent_vector(
+                vector_pool=i_matrix,
+                number_of_columns_v_p=self.r,
+                linear_combination_size=self.d - 2)
+            assert get_hamming_weight(num=result) >= self.d - 1
 
     def test_f_l_i_v_inner_loop(self):
         linear_combination_size = self.d - 2
         combinations_v_p = []
-        vector_pool = fill_i_matrix(self.r)
+        vector_pool = fill_i_matrix(size=self.r)
         for i in range(linear_combination_size):
             combinations_v_p.append(list(combinations(vector_pool, i + 1)))
-        test_value = 4378
-        assert get_hamming_weight(test_value) < self.d - 1
+        test_value = 4378  # 1000100011010
+        assert get_hamming_weight(num=test_value) < self.d - 1
         for i in range(1000):
-            assert f_l_i_v_inner_loop(test_value, combinations_v_p) != test_value
+            assert f_l_i_v_inner_loop(
+                probe=test_value,
+                combinations_v_p=combinations_v_p) != test_value
 
     def test_sum_modulo_2(self):
         test_list = []
@@ -87,24 +101,24 @@ class LinearCodeTest(unittest.TestCase):
         position = 1
         allocate_bits_in_column(matrix=matrix, position=position, number=2, n=n)
         assert 2 ** (n - 1 - position) == matrix[1]
-        pass
 
     def test_fill_parity_check_matrix_and_a_matrix_transposed(self):
         parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(
-            self.n,
-            self.r,
-            self.d)
+            n=self.n,
+            r=self.r,
+            d=self.d)
         print()
         for line in parity_check_matrix:
-            print(format(line, '#0{0}b'.format(n + 2)))
-        pass
+            assert line != 0
+            print(format(line, '#0{0}b'.format(self.n + 2)))
+        for line in a_matrix_transposed:
+            assert get_hamming_weight(line) >= self.d - 1
 
     def test_is_power_of_two(self):
         num = 256
-        assert is_power_of_two(num)
+        assert is_power_of_two(num=num)
         num = 255
-        assert not is_power_of_two(num)
-        pass
+        assert not is_power_of_two(num=num)
 
     def test_fill_i_matrix(self):
         r = 10
@@ -113,9 +127,8 @@ class LinearCodeTest(unittest.TestCase):
         for num in matrix:
             assert 2 ** (r - 1 - i) == num
             i += 1
-        pass
 
-    def test_append_matrix_to_front(self):
+    def test_add_matrix_to_front(self):
         n = 10
         k = 7
         r = n - k
@@ -123,42 +136,48 @@ class LinearCodeTest(unittest.TestCase):
         print()
         for i in range(k):
             matrix1.append(i + 1)
-        matrix2 = fill_i_matrix(k)
+        matrix2 = fill_i_matrix(size=k)
         i = 0
-        for num in add_matrix_in_front(matrix1, matrix2, r):
+        for num in add_matrix_in_front(where=matrix1, what=matrix2, lshift=r):
             # each number consists of the power of two and an element of an I-matrix
             assert num == 2 ** (n - 1 - i) + (i + 1)
             i += 1
-        pass
+
+    def test_add_matrix_to_front_exception(self):
+        with self.assertRaises(ValueError):
+            add_matrix_in_front([0], [0, 0], 1)
 
     def test_generator_matrix_from_a_matrix_transposed(self):
         n = 10
         k = 3
         r = n - k
         d = 1
-        parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n, r, d)
+        parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n=n, r=r, d=d)
         print()
         for i in parity_check_matrix:
             print(format(i, '#0{0}b'.format(n + 2)))
         print()
-        for i in fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r):
+        for i in fill_generator_matrix_from_a_matrix_transposed(
+                a_matrix_transposed=a_matrix_transposed,
+                k=k,
+                r=r):
+            assert get_hamming_weight(i) >= d
             print(format(i, '#0{0}b'.format(n + 2)))
 
     def test_transpose_matrix(self):
         n = 10
         r = 7
         d = 1
-        matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n, r, d)
+        matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n=n, r=r, d=d)
         print()
         for i in matrix:
             print(format(i, '#0{0}b'.format(n + 2)))
         print()
-        transposed_matrix = transpose_matrix(matrix, n)
+        transposed_matrix = transpose_matrix(matrix=matrix, number_of_columns=n)
         for i in transposed_matrix:
             print(format(i, '#0{0}b'.format(r + 2)))
         print()
-        doubly_transposed_matrix = transpose_matrix(transposed_matrix, r)
-
+        doubly_transposed_matrix = transpose_matrix(matrix=transposed_matrix, number_of_columns=r)
         for i in range(len(doubly_transposed_matrix)):
             assert doubly_transposed_matrix[i] == matrix[i]
             print(format(doubly_transposed_matrix[i], '#0{0}b'.format(n + 2)))
@@ -168,31 +187,35 @@ class LinearCodeTest(unittest.TestCase):
         number_parity_exceeding_length_0 = 0b1101
         number_parity_1 = 0b11111111111
         number_parity_exceeding_length_1 = 0b111111111111
-        assert compute_parity(number_parity_0, 3) == 0
-        assert compute_parity(number_parity_exceeding_length_0, 3) == 0
-        assert compute_parity(number_parity_1, 11) == 1
-        assert compute_parity(number_parity_exceeding_length_1, 3) == 1
-        pass
+        assert compute_parity(number=number_parity_0, length=3) == 0
+        assert compute_parity(number=number_parity_exceeding_length_0, length=3) == 0
+        assert compute_parity(number=number_parity_1, length=11) == 1
+        assert compute_parity(number=number_parity_exceeding_length_1, length=3) == 1
 
     def test_multiply_matrices(self):
         parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(
-            self.n,
-            self.r,
-            self.d)
-        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, self.k, self.r)
+            n=self.n,
+            r=self.r,
+            d=self.d)
+        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(
+            a_matrix_transposed=a_matrix_transposed,
+            k=self.k,
+            r=self.r)
         multiplied_matrix = multiply_matrices(
-            parity_check_matrix,
-            self.n,
-            transpose_matrix(generator_matrix, self.n),
-            self.k)
-        print()
+            matrix1=parity_check_matrix,
+            num_col_m1=self.n,
+            matrix2=transpose_matrix(generator_matrix, self.n),
+            num_col_m2=self.k)
         for i in multiplied_matrix:
             assert i == 0
-        pass
+
+    def test_multiply_matrices_exception(self):
+        with self.assertRaises(ValueError):
+            multiply_matrices([0, 0], 2, [0], 1)
 
     def test_partition_by_is_power_of_two(self):
         n = 100
-        powers_of_two, not_powers_of_two = partition_by_is_power_of_two(n)
+        powers_of_two, not_powers_of_two = partition_by_is_power_of_two(num=n)
         max_value = 0
         for i in range(n):
             max_value += i + 1
@@ -207,18 +230,16 @@ class LinearCodeTest(unittest.TestCase):
         assert len(powers_of_two) == counter
         assert len(not_powers_of_two) == n - counter
         assert sum(powers_of_two) + sum(not_powers_of_two) == max_value
-        pass
 
     def test_get_hamming_weight(self):
-        assert get_hamming_weight(7) == 3
-        assert get_hamming_weight(8) == 1
-        assert get_hamming_weight(1) == 1
-        pass
+        assert get_hamming_weight(num=7) == 3
+        assert get_hamming_weight(num=8) == 1
+        assert get_hamming_weight(num=1) == 1
 
     def test_get_binary_numbers_partitioned_by_weight(self):
         n = 127
         length = len(bin(n)) - 2
-        binary_numbers_partitioned_by_weight = partition_binary_numbers_by_weight(n)
+        binary_numbers_partitioned_by_weight = partition_binary_numbers_by_weight(num=n)
         weight = 0
         for i in binary_numbers_partitioned_by_weight:
             if weight != get_hamming_weight(i):
@@ -233,8 +254,11 @@ class LinearCodeTest(unittest.TestCase):
         r = 3
         k = n - r
         d = 1
-        parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n, r, d)
-        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(a_matrix_transposed, k, r)
+        parity_check_matrix, a_matrix_transposed = fill_parity_check_matrix_and_a_matrix_transposed(n=n, r=r, d=d)
+        generator_matrix = fill_generator_matrix_from_a_matrix_transposed(
+            a_matrix_transposed=a_matrix_transposed,
+            k=k,
+            r=r)
         print()
         print('A parity check matrix:')
         print()
@@ -245,83 +269,117 @@ class LinearCodeTest(unittest.TestCase):
         print()
         for num in generator_matrix:
             print(format(num, '#0{0}b'.format(n + 2)))
-        syndrome_decoding_table = generate_syndrome_decoding_table(generator_matrix, parity_check_matrix, n, k)
+        syndrome_decoding_table = generate_syndrome_decoding_table(
+            generator_matrix=generator_matrix,
+            parity_check_matrix=parity_check_matrix,
+            n=n,
+            k=k,
+            d=d)
         for key in syndrome_decoding_table.keys():
             print()
             print(format(key, '#0{0}b'.format(k + 2)))
             print('---------')
             for word in syndrome_decoding_table[key]:
                 print(format(word, '#0{0}b'.format(n + 2)))
-        check_list = []
-        number_of_words = 2 ** n
-        for i in range(number_of_words):
-            check_list.append(i)
-        number_of_words_in_table = 0
         for key in syndrome_decoding_table.keys():
+            if key == 0:
+                continue
             for word in syndrome_decoding_table[key]:
-                check_list.remove(word)
-                number_of_words_in_table += 1
-        assert len(check_list) == 0
-        assert number_of_words_in_table == number_of_words
+                assert get_hamming_weight(word) <= self.t
+                assert word != 0
 
     def test_get_binomial_coefficient(self):
-        assert get_binomial_coefficient(10, 1) == 10
-        assert get_binomial_coefficient(10, 2) == 45
-        assert get_binomial_coefficient(10, 3) == 120
-        assert get_binomial_coefficient(10, 4) == 210
+        assert get_binomial_coefficient(n=10, k=1) == 10
+        assert get_binomial_coefficient(n=10, k=2) == 45
+        assert get_binomial_coefficient(n=10, k=3) == 120
+        assert get_binomial_coefficient(n=10, k=4) == 210
 
     def test_calculate_p_error(self):
         n = 10
         t = 1
         p = 0.01
-        assert round(calculate_p_error(n, t, p), 5) == 0.00427
+        assert round(calculate_p_error(n=n, t=t, p=p), 5) == 0.00427
 
     def test_read_file_to_dict(self):
-        config = yaml.safe_load(open('config.yml'))
-        dictionary = read_file_to_dict(config['decoder-syndrome-decoding'])
+        config = yaml.safe_load(open('config-test.yml'))
+        dictionary = read_file_to_dict(name=config['decoder-syndrome-decoding-test'])
         n = 10
         k = 3
         r = n - k
+        zero_word_counter = 0
+        word_counter = 0
         for key in dictionary.keys():
             print()
             print('{0:0>{width}b}'.format(key, width=r))
             print('---------')
             for word in dictionary[key]:
+                if word == 0:
+                    zero_word_counter += 1
                 print('{0:0>{width}b}'.format(word, width=n))
+                word_counter += 1
+        assert zero_word_counter <= 1
+        assert word_counter > 2 ** r
 
     def test_code(self):
-        config = yaml.safe_load(open('config.yml'))
+        config = yaml.safe_load(open('config-test.yml'))
         for i in range(2 ** self.k):
             code, distorted_code, error = linearcode.code(
-                coder_file=config['coder-generator'],
+                coder_file=config['coder-generator-test'],
                 message=i,
                 m_length=self.k,
-                error=74)
-            assert transpose_matrix(multiply_matrices(
-                matrix1=linearcode.read_file_to_list(config['decoder-parity-check']),
-                num_col_m1=self.n,
-                matrix2=transpose_matrix([code], self.n),
-                num_col_m2=1
-            ), 1)[0] == 0
+                error=74)  # 000000000000001001010
+            assert transpose_matrix(
+                matrix=multiply_matrices(
+                    matrix1=read_file_to_list(config['decoder-parity-check-test']),
+                    num_col_m1=self.n,
+                    matrix2=transpose_matrix([code], self.n),
+                    num_col_m2=1
+                ),
+                number_of_columns=1)[0] == 0
             print()
             print('Message:           {0}\n'.format(i))
             print('Code:           {0:0>{width}b}\n'.format(code, width=self.n))
             print('Distorted code: {0:0>{width}b}\n'.format(distorted_code, width=self.n))
             print('Error:          {0:0>{width}b}\n'.format(error, width=self.n))
+        for i in range(2 ** self.k):
+            code, distorted_code, error = linearcode.code(
+                coder_file=config['coder-generator-test'],
+                message=i,
+                m_length=self.k)
+            if get_hamming_weight(error) <= self.t:
+                assert transpose_matrix(
+                    matrix=multiply_matrices(
+                        matrix1=read_file_to_list(config['decoder-parity-check-test']),
+                        num_col_m1=self.n,
+                        matrix2=transpose_matrix([code], self.n),
+                        num_col_m2=1
+                    ),
+                    number_of_columns=1)[0] == 0
+
+    def test_code_exception(self):
+        config = yaml.safe_load(open('config-test.yml'))
+        with self.assertRaises(ValueError):
+            linearcode.code(
+                coder_file=config['coder-generator-test'],
+                message=1,
+                m_length=2,
+                error=74)
 
     def test_decode(self):
-        config = yaml.safe_load(open('config.yml'))
-        message = linearcode.decode(
-            config['decoder-parity-check'],
-            self.n,
-            config['decoder-syndrome-decoding'],
-            int('110010000110111000100', 2)
+        message = 56
+        config = yaml.safe_load(open('config-test.yml'))
+        decoded_message = linearcode.decode(
+            parity_check_file=config['decoder-parity-check-test'],
+            n=self.n,
+            syndrome_file=config['decoder-syndrome-decoding-test'],
+            distorted_code=int('110010000110111000100', 2)
         )
+        assert decoded_message == message
         print()
-        print(message)
+        print(decoded_message)
 
     def test_code_decode(self):
-        config = yaml.safe_load(open('config.yml'))
+        config = yaml.safe_load(open('config-test.yml'))
         number_of_unfixed_errors = 0
         print()
         number_of_repetitions = 100
@@ -329,15 +387,15 @@ class LinearCodeTest(unittest.TestCase):
             message = random.randrange(2 ** self.k)
             rand_error = get_random_number_of_hamming_weight(self.n, int((self.d - 1) / 2))
             code, distorted_code, error = linearcode.code(
-                coder_file=config['coder-generator'],
+                coder_file=config['coder-generator-test'],
                 message=message,
                 m_length=self.k,
                 error=rand_error)
             assert rand_error == error
             decoded = linearcode.decode(
-                parity_check_file=config['decoder-parity-check'],
+                parity_check_file=config['decoder-parity-check-test'],
                 n=self.n,
-                syndrome_file=config['decoder-syndrome-decoding'],
+                syndrome_file=config['decoder-syndrome-decoding-test'],
                 distorted_code=distorted_code
             )
             if decoded != message:
@@ -345,6 +403,7 @@ class LinearCodeTest(unittest.TestCase):
                 print('Message is {0}, distorted code is {1:0>{width}b}, error is {2:0>{width}b}, deciphered is {3}'
                       .format(message, distorted_code, rand_error, decoded, width=self.n))
         print()
+        assert number_of_unfixed_errors == 0
         print('Number of errors which weren\'t fixed is {0}, the rate is {1}'
               .format(number_of_unfixed_errors, number_of_unfixed_errors / number_of_repetitions))
 
@@ -354,9 +413,16 @@ class LinearCodeTest(unittest.TestCase):
             if length == 0:
                 continue
             weight = random.randrange(length)
-            probe = get_random_number_of_hamming_weight(length, weight)
-            assert get_hamming_weight(probe) == weight
+            probe = get_random_number_of_hamming_weight(length=length, weight=weight)
+            assert get_hamming_weight(num=probe) == weight
 
+    def test_get_random_number_of_hamming_weight_exception(self):
+        with self.assertRaises(ValueError):
+            get_random_number_of_hamming_weight(length=2, weight=3)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        remove_files()
 
 if __name__ == '__main__':
     unittest.main()

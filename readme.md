@@ -20,4 +20,12 @@ The 1st file is used in II, the 2nd and the 3rd are used in III.
 II. The generator matrix is used to code a message. 
 Then an arbitrary or a particular error vector is added to the codeword.
 
-III. The parity check matrix and the standard array are used to decode a distorted message. 
+III. The parity check matrix and the standard array are used to decode a distorted message.
+
+To run the program use Python 3:
+1. Clone the repo using "git clone 'repo url'".
+2. Open terminal and "cd 'directory where you just have cloned the repo'".
+3. Type "python3" in the prompt.
+4. Type "from simulation import simulate".
+5. Type "simulate()", it starts the program.
+6. Follow instructions on the screen.

@@ -685,7 +685,7 @@ def read_file_to_dict(name):
 
 
 @timeout.timeout(yaml.safe_load(open("config.yml"))['timeout'])
-def code(coder_file, message, m_length, error=0):
+def encode(coder_file, message, m_length, error=0):
     """
     Codes a message and distorts the code
     by the specified error vector if any

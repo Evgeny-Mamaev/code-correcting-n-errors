@@ -1,7 +1,7 @@
 import unittest
 
 from linearcode import ErrorCorrectingCode
-from test.testutils import remove_files
+from fileutils import remove_files
 
 
 class BuildCodeTest(unittest.TestCase):
@@ -10,4 +10,4 @@ class BuildCodeTest(unittest.TestCase):
         remove_files()
 
     def test_capability(self):
-        ErrorCorrectingCode(r=23, n=28, t=5, channel_error_probability=0.01)
+        ErrorCorrectingCode(r=19, n=23, t=4, channel_error_probability=0.01)
